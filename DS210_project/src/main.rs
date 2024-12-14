@@ -2,7 +2,8 @@ use petgraph::graph::Graph;
 use petgraph::algo::dijkstra;
 use std::collections::HashMap;
 use std::error::Error;
-
+mod csv_reader;
+use csv_reader::read_csv;
 
 // builds a graph of the asteroids in the dataset based on proximity to earth
 fn build_graph(data: &Vec<csv_reader::AsteroidData>, threshold: f64) -> Graph<String, f64> {
@@ -84,4 +85,43 @@ fn cluster_asteroids(graph: &Graph<String, f64>) -> Vec<Vec<String>> {
     }
 
     clusters
+}
+
+// find the top 50 asteroids that passed closest to Earth
+fn top_closest_asteroids(data: &Vec<csv_reader::AsteroidData>) -> Vec<(String, f64)> {
+    let mut closest = data
+        .iter()
+        .map(|a| (a.des.clone(), a.dist))
+        .collect::<Vec<_>>();
+
+    closest.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    closest.into_iter().take(50).collect()
+}
+fn main() -> Result<(), Box<dyn Error>> {
+    // specify the file path to the CSV dataset
+    let file_path = "/Users/laurelpurcell/Downloads/DS210_asteroid_data.csv";
+
+    // read the CSV file using the csv_reader module
+    let data: Vec<csv_reader::AsteroidData> = read_csv(file_path.to_string())?;
+
+    // define a proximity threshold (in AU)
+    let threshold = 0.01;
+
+    // guild the graph
+    let graph = build_graph(&data, threshold);
+
+    // compute centrality measures
+    let _centrality = compute_centrality(&graph);
+
+    // cluster asteroids 
+    let _clusters = cluster_asteroids(&graph);
+
+    // print top 50 closest asteroids
+    println!("\nTop 50 Closest Asteroids:");
+    let closest_asteroids = top_closest_asteroids(&data);
+    for (name, dist) in closest_asteroids {
+        println!("{}: {:.6} AU", name, dist);
+    }
+
+    Ok(())
 }

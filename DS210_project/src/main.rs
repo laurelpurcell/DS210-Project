@@ -49,3 +49,39 @@ fn compute_centrality(graph: &Graph<String, f64>) -> HashMap<String, f64> {
 
     centrality
 }
+
+// function to cluster asteroids by proximity using connected components
+fn cluster_asteroids(graph: &Graph<String, f64>) -> Vec<Vec<String>> {
+    let mut clusters = Vec::new();
+    let mut visited = HashMap::new();
+
+    for node in graph.node_indices() {
+        visited.insert(node, false);
+    }
+
+    for node in graph.node_indices() {
+        if !visited[&node] {
+            let mut cluster = Vec::new();
+            let mut stack = vec![node];
+
+            while let Some(current) = stack.pop() {
+                if visited[&current] {
+                    continue;
+                }
+
+                visited.insert(current, true);
+                cluster.push(graph[current].clone());
+
+                for neighbor in graph.neighbors(current) {
+                    if !visited[&neighbor] {
+                        stack.push(neighbor);
+                    }
+                }
+            }
+
+            clusters.push(cluster);
+        }
+    }
+
+    clusters
+}

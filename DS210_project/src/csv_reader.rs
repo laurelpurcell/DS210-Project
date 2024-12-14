@@ -19,13 +19,14 @@ pub struct AsteroidData {
 }
 
 // creates a function to parse the CSV file into a vector of AsteroidData
-fn read_csv(file_path: String) -> Result<Vec<AsteroidData>, Box<dyn Error>> {
+pub fn read_csv(file_path: String) -> Result<Vec<AsteroidData>, Box<dyn Error>> {
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
         .from_path(&file_path)?; // fixed variable name that calls the local path 
 
     let headers = reader.headers()?.clone();
     let des_idx = headers.iter().position(|h| h == "des").ok_or("Missing header 'des'")?;
+    let orbit_id_idx = headers.iter().position(|h| h == "orbit_id").ok_or("Missing header 'orbit_id'")?;
     let jd_idx = headers.iter().position(|h| h == "jd").ok_or("Missing header 'jd'")?;
     let cd_idx = headers.iter().position(|h| h == "cd").ok_or("Missing header 'cd'")?;
     let dist_idx = headers.iter().position(|h| h == "dist").ok_or("Missing header 'dist'")?;

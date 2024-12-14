@@ -125,3 +125,113 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+
+#[test]
+fn test_top_50_closest_asteroids() {
+    let data = vec![ // creates vectors with example data to test
+        csv_reader::AsteroidData {
+            des: "Asteroid A".to_string(),
+            orbit_id: "1".to_string(),
+            jd: 2459200.5,
+            cd: "2021-01-01".to_string(),
+            dist: 0.002,
+            dist_min: 0.0019,
+            dist_max: 0.0021,
+            v_rel: 5.0,
+            v_inf: 4.8,
+            t_sigma_f: "0".to_string(),
+        },
+        csv_reader::AsteroidData {
+            des: "Asteroid B".to_string(),
+            orbit_id: "2".to_string(),
+            jd: 2459201.5,
+            cd: "2021-01-02".to_string(),
+            dist: 0.003,
+            dist_min: 0.0029,
+            dist_max: 0.0031,
+            v_rel: 6.0,
+            v_inf: 5.9,
+            t_sigma_f: "0".to_string(),
+        },
+        csv_reader::AsteroidData {
+            des: "Asteroid C".to_string(),
+            orbit_id: "3".to_string(),
+            jd: 2459202.5,
+            cd: "2021-01-03".to_string(),
+            dist: 0.001,
+            dist_min: 0.0009,
+            dist_max: 0.0011,
+            v_rel: 7.0,
+            v_inf: 6.8,
+            t_sigma_f: "0".to_string(),
+        },
+    ];
+
+    let result = top_closest_asteroids(&data);
+
+    assert_eq!(result.len(), 3); // fewer than 50 in the dataset
+    assert_eq!(result[0].0, "Asteroid C");
+    assert_eq!(result[0].1, 0.001);
+    assert_eq!(result[1].0, "Asteroid A");
+    assert_eq!(result[1].1, 0.002);
+    assert_eq!(result[2].0, "Asteroid B");
+    assert_eq!(result[2].1, 0.003);
+}
+
+
+
+#[test]
+fn test_building_threshold() {
+    let data = vec![
+        csv_reader::AsteroidData {
+            des: "Asteroid X".to_string(),
+            orbit_id: "10".to_string(),
+            jd: 2459205.5,
+            cd: "2021-01-05".to_string(),
+            dist: 0.002,
+            dist_min: 0.0019,
+            dist_max: 0.0021,
+            v_rel: 5.5,
+            v_inf: 5.2,
+            t_sigma_f: "0".to_string(),
+        },
+        csv_reader::AsteroidData {
+            des: "Asteroid Y".to_string(),
+            orbit_id: "11".to_string(),
+            jd: 2459206.5,
+            cd: "2021-01-06".to_string(),
+            dist: 0.0025,
+            dist_min: 0.0024,
+            dist_max: 0.0026,
+            v_rel: 6.5,
+            v_inf: 6.2,
+            t_sigma_f: "0".to_string(),
+        },
+        csv_reader::AsteroidData {
+            des: "Asteroid Z".to_string(),
+            orbit_id: "12".to_string(),
+            jd: 2459207.5,
+            cd: "2021-01-07".to_string(),
+            dist: 0.01,
+            dist_min: 0.009,
+            dist_max: 0.011,
+            v_rel: 7.5,
+            v_inf: 7.2,
+            t_sigma_f: "0".to_string(),
+        },
+    ];
+
+    let threshold = 0.001; // threshold is too small, no edges expected
+    let graph = build_graph(&data, threshold);
+
+    assert_eq!(graph.node_count(), 3);
+    assert_eq!(graph.edge_count(), 0);
+
+    let threshold = 0.01; // larger threshold, links should exist
+    let graph = build_graph(&data, threshold);
+
+    assert_eq!(graph.node_count(), 3);
+    assert!(graph.edge_count() > 0); // ensures there are at least some edges
+}
+

@@ -30,3 +30,22 @@ fn build_graph(data: &Vec<csv_reader::AsteroidData>, threshold: f64) -> Graph<St
 
     graph
 }
+
+// compute the centrality measures (closeness centrality)
+fn compute_centrality(graph: &Graph<String, f64>) -> HashMap<String, f64> {
+    let mut centrality = HashMap::new();
+
+    for node in graph.node_indices() {
+        let distances = dijkstra(graph, node, None, |e| *e.weight());
+        let total_distance: f64 = distances.values().sum();
+        let closeness = if total_distance > 0.0 {
+            1.0 / total_distance
+        } else {
+            0.0
+        };
+        let node_name = &graph[node];
+        centrality.insert(node_name.clone(), closeness);
+    }
+
+    centrality
+}

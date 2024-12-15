@@ -1,237 +1,165 @@
-use petgraph::graph::Graph;
-use petgraph::algo::dijkstra;
+use petgraph::graph::{Graph, NodeIndex};
 use std::collections::HashMap;
 use std::error::Error;
 mod csv_reader;
 use csv_reader::read_csv;
 
-// builds a graph of the asteroids in the dataset based on proximity to earth
-fn build_graph(data: &Vec<csv_reader::AsteroidData>, threshold: f64) -> Graph<String, f64> {
-    let mut graph = Graph::<String, f64>::new();
+// build a graph where nodes represent asteroids and edges indicate hazard comparisons
+pub fn build_hazard_graph(data: &Vec<csv_reader::AsteroidData>, dist_threshold: f64, velocity_threshold: f64) -> Graph<(String, f64, f64), f64> {
+    let mut graph = Graph::<(String, f64, f64), f64>::new();
     let mut node_map = HashMap::new();
 
     // add nodes to the graph
     for record in data {
-        let node = graph.add_node(record.des.clone());
-        node_map.insert(record.des.clone(), node);
-    }
-
-    // add edges between close approaches
-    for (i, a) in data.iter().enumerate() {
-        for (_j, b) in data.iter().enumerate().skip(i + 1) {
-            if a.dist.is_nan() || b.dist.is_nan() {
-                continue; // skips invalid rows
-            }
-            let distance = (a.dist - b.dist).abs();
-            if distance <= threshold {
-                graph.add_edge(node_map[&a.des], node_map[&b.des], distance);
-            }
+        if record.dist_min <= dist_threshold && record.v_rel >= velocity_threshold {
+            let node = graph.add_node((record.des.clone(), record.dist_min, record.v_rel));
+            node_map.insert(record.des.clone(), node);
         }
     }
+
+    // add edges to compare the hazard levels between asteroids
+    for node_a in graph.node_indices() {
+        for node_b in graph.node_indices() {
+            if node_a == node_b {
+                continue; // skip self-comparison
+            }
+            
+            let asteroid_a = &graph[node_a];
+            let asteroid_b = &graph[node_b];
+
+            // hazard score comparison
+            let hazard_a = asteroid_a.1 / asteroid_a.2; // Higher velocity & closer distance increases hazard
+            let hazard_b = asteroid_b.1 / asteroid_b.2;
+
+            // add edges weighted by difference in hazard score
+            let weight = (hazard_a - hazard_b).abs();
+            graph.add_edge(node_a, node_b, weight);
+        }
+    } // nodes are connected if both asteroids meet a certain "hazard threshold"
 
     graph
 }
 
-// compute the centrality measures (closeness centrality)
-fn compute_centrality(graph: &Graph<String, f64>) -> HashMap<String, f64> {
-    let mut centrality = HashMap::new();
+// rank asteroids based on hazard score and include details in the result
+pub fn rank_hazardous_asteroids_with_details(data: &Vec<csv_reader::AsteroidData>) -> Vec<(String, f64, f64, String)> {
+    let mut ranked_asteroids = data
+        .iter()
+        .map(|a| {
+            let hazard_score = if a.dist_min > 0.0 {
+                a.v_rel / a.dist_min // higher score for closer and faster asteroids
+            } else {
+                f64::INFINITY // assign very high hazard for zero distances
+            };
+            (a.des.clone(), hazard_score, a.dist_min, a.cd.clone())
+        })
+        .collect::<Vec<_>>();
 
-    for node in graph.node_indices() {
-        let distances = dijkstra(graph, node, None, |e| *e.weight());
-        let total_distance: f64 = distances.values().sum();
-        let closeness = if total_distance > 0.0 {
-            1.0 / total_distance
-        } else {
-            0.0
-        };
-        let node_name = &graph[node];
-        centrality.insert(node_name.clone(), closeness);
-    }
+    // sort by hazard score in descending order
+    ranked_asteroids.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    centrality
+    ranked_asteroids
 }
 
-// function to cluster asteroids by proximity using connected components
-fn cluster_asteroids(graph: &Graph<String, f64>) -> Vec<Vec<String>> {
-    let mut clusters = Vec::new();
-    let mut visited = HashMap::new();
+/// cluster asteroids based on hazard score
+pub fn cluster_asteroids_by_hazard(data: &[(String, f64, f64, String)]) -> HashMap<String, Vec<(String, f64, f64, String)>> {
+    // define hazard score thresholds for clusters
+    let thresholds = vec![
+        (0.0, 10.0, "Negligible Risk"),    // Scores between 0 and 10
+        (10.0, 50.0, "Low Risk"), // Scores between 10 and 50
+        (50.0, 100.0, "Moderate Risk"), // Scores between 50 and 100
+        (100.0, f64::INFINITY, "Highest Risk"), // Scores above 100
+    ];
 
-    for node in graph.node_indices() {
-        visited.insert(node, false);
+    let mut clusters: HashMap<String, Vec<(String, f64, f64, String)>> = HashMap::new();
+
+    // initialize clusters
+    for (_, _, label) in &thresholds {
+        clusters.insert(label.to_string(), Vec::new());
     }
 
-    for node in graph.node_indices() {
-        if !visited[&node] {
-            let mut cluster = Vec::new();
-            let mut stack = vec![node];
-
-            while let Some(current) = stack.pop() {
-                if visited[&current] {
-                    continue;
-                }
-
-                visited.insert(current, true);
-                cluster.push(graph[current].clone());
-
-                for neighbor in graph.neighbors(current) {
-                    if !visited[&neighbor] {
-                        stack.push(neighbor);
-                    }
-                }
+    // assign each asteroid to a cluster based on hazard score
+    for asteroid in data {
+        let score = asteroid.1;
+        for (min, max, label) in &thresholds {
+            if score >= *min && score < *max {
+                clusters.get_mut(&label.to_string()).unwrap().push(asteroid.clone());
+                break;
             }
-
-            clusters.push(cluster);
         }
     }
 
     clusters
 }
 
-// find the top 50 asteroids that passed closest to Earth
-fn top_closest_asteroids(data: &Vec<csv_reader::AsteroidData>) -> Vec<(String, f64)> {
-    let mut closest = data
-        .iter()
-        .map(|a| (a.des.clone(), a.dist))
-        .collect::<Vec<_>>();
-
-    closest.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    closest.into_iter().take(50).collect()
-}
 fn main() -> Result<(), Box<dyn Error>> {
-    // specify the file path to the CSV dataset
-    let file_path = "/Users/laurelpurcell/Downloads/DS210_asteroid_data.csv";
+    // path to the CSV file
+    let file_path = "/Users/laurelpurcell/Downloads/DS210_asteroid_data.csv".to_string();
 
-    // read the CSV file using the csv_reader module
-    let data: Vec<csv_reader::AsteroidData> = read_csv(file_path.to_string())?;
+    // check if file exists
+    if !std::path::Path::new(&file_path).exists() {
+        eprintln!("Error: File not found at path: {}", file_path);
+        return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found")));
+    }
 
-    // define a proximity threshold (in AU)
-    let threshold = 0.01;
+    // read the CSV file with the csv_reader
+    let data: Vec<csv_reader::AsteroidData> = read_csv(file_path)?;
 
-    // guild the graph
-    let graph = build_graph(&data, threshold);
+    // rank the asteroids based on their hazard score
+    let ranked_asteroids = rank_hazardous_asteroids_with_details(&data);
 
-    // compute centrality measures
-    let _centrality = compute_centrality(&graph);
+    // Cluster asteroids by hazard score
+    let clusters = cluster_asteroids_by_hazard(&ranked_asteroids);
 
-    // cluster asteroids 
-    let _clusters = cluster_asteroids(&graph);
+    // builds hazard graph
+    let dist_threshold = 0.05;  // minimum distance (in AU)
+    let velocity_threshold = 10.0; // minimum relative velocity (in km/s)
+    let _hazard_graph = build_hazard_graph(&data, dist_threshold, velocity_threshold);
 
-    // print top 50 closest asteroids
-    println!("\nTop 50 Closest Asteroids:");
-    let closest_asteroids = top_closest_asteroids(&data);
-    for (name, dist) in closest_asteroids {
-        println!("{}: {:.6} AU", name, dist);
+    // print the top 50 hazardous asteroids with their details
+    println!("Top 50 Hazardous Asteroids:");
+    println!("{:<25} {:<15} {:<15} {:<20} {:<15} {:<15}", "Asteroid", "Min Distance (AU)", "Velocity (km/s)", "Closest Approach Date", "Hazard Score", "Hazard Cluster");
+    println!("{}", "-".repeat(105));
+    for asteroid in ranked_asteroids.iter().take(50) {
+        let cluster = clusters.iter().find(|(_, asteroids)| {
+            asteroids.iter().any(|(n, _, _, _)| n == &asteroid.0)
+        }).map(|(cluster_name, _)| cluster_name.clone()).unwrap_or("Unknown".to_string());
+
+        println!("{:<25} {:<15.6} {:<15.2} {:<20} {:<15.2} {:<15}",
+            asteroid.0, asteroid.2, asteroid.1, asteroid.3, asteroid.1 / asteroid.2, cluster);
+    }
+
+    // established an interactive lookup to manually search for asteroids
+    use std::io::{self, Write};
+
+    println!("\nEnter the name of an asteroid to retrieve details or type 'exit' to quit:");
+    loop {
+        print!("Asteroid name: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+
+        if input.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        if let Some(asteroid) = ranked_asteroids.iter().find(|(name, _, _, _)| name == input) {
+            let cluster = clusters.iter().find(|(_, asteroids)| {
+                asteroids.iter().any(|(n, _, _, _)| n == &asteroid.0)
+            }).map(|(cluster_name, _)| cluster_name.clone()).unwrap_or("Unknown".to_string());
+
+            println!("\nDetails for asteroid '{}':", asteroid.0);
+            println!("{:<15}: {:.6} AU", "Min Distance", asteroid.2);
+            println!("{:<15}: {:.2} km/s", "Velocity", asteroid.1);
+            println!("{:<15}: {}", "Date", asteroid.3);
+            println!("{:<15}: {}", "Hazard Cluster", cluster);
+        } else {
+            println!("Asteroid '{}' not found in the dataset.", input);
+        }
     }
 
     Ok(())
 }
-
-
-#[test]
-fn test_top_50_closest_asteroids() {
-    let data = vec![ // creates vectors with example data to test
-        csv_reader::AsteroidData {
-            des: "Asteroid A".to_string(),
-            orbit_id: "1".to_string(),
-            jd: 2459200.5,
-            cd: "2021-01-01".to_string(),
-            dist: 0.002,
-            dist_min: 0.0019,
-            dist_max: 0.0021,
-            v_rel: 5.0,
-            v_inf: 4.8,
-            t_sigma_f: "0".to_string(),
-        },
-        csv_reader::AsteroidData {
-            des: "Asteroid B".to_string(),
-            orbit_id: "2".to_string(),
-            jd: 2459201.5,
-            cd: "2021-01-02".to_string(),
-            dist: 0.003,
-            dist_min: 0.0029,
-            dist_max: 0.0031,
-            v_rel: 6.0,
-            v_inf: 5.9,
-            t_sigma_f: "0".to_string(),
-        },
-        csv_reader::AsteroidData {
-            des: "Asteroid C".to_string(),
-            orbit_id: "3".to_string(),
-            jd: 2459202.5,
-            cd: "2021-01-03".to_string(),
-            dist: 0.001,
-            dist_min: 0.0009,
-            dist_max: 0.0011,
-            v_rel: 7.0,
-            v_inf: 6.8,
-            t_sigma_f: "0".to_string(),
-        },
-    ];
-
-    let result = top_closest_asteroids(&data);
-
-    assert_eq!(result.len(), 3); // fewer than 50 in the dataset
-    assert_eq!(result[0].0, "Asteroid C");
-    assert_eq!(result[0].1, 0.001);
-    assert_eq!(result[1].0, "Asteroid A");
-    assert_eq!(result[1].1, 0.002);
-    assert_eq!(result[2].0, "Asteroid B");
-    assert_eq!(result[2].1, 0.003);
-}
-
-
-
-#[test]
-fn test_building_threshold() {
-    let data = vec![
-        csv_reader::AsteroidData {
-            des: "Asteroid X".to_string(),
-            orbit_id: "10".to_string(),
-            jd: 2459205.5,
-            cd: "2021-01-05".to_string(),
-            dist: 0.002,
-            dist_min: 0.0019,
-            dist_max: 0.0021,
-            v_rel: 5.5,
-            v_inf: 5.2,
-            t_sigma_f: "0".to_string(),
-        },
-        csv_reader::AsteroidData {
-            des: "Asteroid Y".to_string(),
-            orbit_id: "11".to_string(),
-            jd: 2459206.5,
-            cd: "2021-01-06".to_string(),
-            dist: 0.0025,
-            dist_min: 0.0024,
-            dist_max: 0.0026,
-            v_rel: 6.5,
-            v_inf: 6.2,
-            t_sigma_f: "0".to_string(),
-        },
-        csv_reader::AsteroidData {
-            des: "Asteroid Z".to_string(),
-            orbit_id: "12".to_string(),
-            jd: 2459207.5,
-            cd: "2021-01-07".to_string(),
-            dist: 0.01,
-            dist_min: 0.009,
-            dist_max: 0.011,
-            v_rel: 7.5,
-            v_inf: 7.2,
-            t_sigma_f: "0".to_string(),
-        },
-    ];
-
-    let threshold = 0.001; // threshold is too small, no edges expected
-    let graph = build_graph(&data, threshold);
-
-    assert_eq!(graph.node_count(), 3);
-    assert_eq!(graph.edge_count(), 0);
-
-    let threshold = 0.01; // larger threshold, links should exist
-    let graph = build_graph(&data, threshold);
-
-    assert_eq!(graph.node_count(), 3);
-    assert!(graph.edge_count() > 0); // ensures there are at least some edges
-}
-

@@ -41,7 +41,7 @@ pub fn build_hazard_graph(data: &Vec<csv_reader::AsteroidData>, dist_threshold: 
 }
 
 // rank asteroids based on hazard score and include details in the result
-pub fn rank_hazardous_asteroids_with_details(data: &Vec<csv_reader::AsteroidData>) -> Vec<(String, f64, f64, String)> {
+pub fn rank_hazardous_asteroids(data: &Vec<csv_reader::AsteroidData>) -> Vec<(String, f64, f64, String)> {
     let mut ranked_asteroids = data
         .iter()
         .map(|a| {
@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let data: Vec<csv_reader::AsteroidData> = read_csv(file_path)?;
 
     // rank the asteroids based on their hazard score
-    let ranked_asteroids = rank_hazardous_asteroids_with_details(&data);
+    let ranked_asteroids = rank_hazardous_asteroids(&data);
 
     // cluster the asteroids by hazard score
     let clusters = cluster_asteroids_by_hazard(&ranked_asteroids);
